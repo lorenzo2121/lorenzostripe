@@ -1,25 +1,28 @@
-const stripe = require('stripe')('sk_test_51PaK4uJ1H5ZQ9QSPHXoMdNZCGNA3CrH439YaWbChIqh00Ko3y7GfWDpoDykulcdQS9ZvdSEONaiz475NK669upAj00kBkqrTcs'); // Inserisci la tua chiave segreta Stripe
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const express = require('express');
-const cors = require('cors'); // Importa il middleware cors
+const cors = require('cors');
 const admin = require('firebase-admin');
+const fs = require('fs');
+const path = require('path');
 const app = express();
 
 // Configura Firebase Admin SDK
-const serviceAccount = require('./public/cianfoni-51cc8-firebase-adminsdk-q8102-516fc87b17.json'); // Inserisci il percorso del tuo file di servizio JSON
+const serviceAccountPath = '/etc/secrets/cianfoni-51cc8-firebase-adminsdk-q8102-516fc87b17.json'; // Path del file segreto
+const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  databaseURL: 'https://default.firebaseio.com' // Sostituisci con l'URL del tuo database Firebase
+  databaseURL: process.env.FIREBASE_DATABASE_URL
 });
 
 const db = admin.firestore();
 
 // Questo è il segreto del webhook per il test
-const endpointSecret = 'whsec_d80f8f3631d10afee8db08465702493191744584a040c1cc81e8593a3c76aad0';
+const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Middleware per parsare il corpo della richiesta come JSON
 app.use(express.json());
-app.use(cors()); // Abilita CORS per tutte le richieste
+app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
 // Endpoint per creare una sessione di checkout
@@ -27,7 +30,6 @@ app.post('/create-checkout-session', async (req, res) => {
   const { priceId, userEmail } = req.body;
 
   try {
-    // Crea una sessione di checkout
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       line_items: [
@@ -47,7 +49,6 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
-
 // Gestisci gli eventi del webhook di Stripe
 app.post('/webhook', express.raw({ type: 'application/json' }), async (request, response) => {
   const sig = request.headers['stripe-signature'];
@@ -55,7 +56,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (request, 
   let event;
 
   try {
-    // Stripe richiede che il body del webhook sia fornito come una stringa raw o un Buffer
     event = stripe.webhooks.constructEvent(request.body, sig, endpointSecret);
   } catch (err) {
     console.error(`Webhook error: ${err.message}`);
@@ -63,17 +63,14 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (request, 
     return;
   }
 
-  // Gestisci l'evento
   switch (event.type) {
     case 'checkout.session.completed':
       const session = event.data.object;
 
-      // Estrai l'ID dell'utente e altre informazioni dal campo success_url
       const urlParams = new URLSearchParams(new URL(session.success_url).search);
       const userEmail = urlParams.get('user_email');
 
       try {
-        // Cerca l'utente usando l'email
         const userQuerySnapshot = await db.collection('professionisti').where('email', '==', userEmail).get();
 
         if (userQuerySnapshot.empty) {
@@ -81,7 +78,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (request, 
           return;
         }
 
-        // Aggiorna il documento dell'utente trovato
         userQuerySnapshot.forEach(async (doc) => {
           await doc.ref.update({
             richiesterimanentin: admin.firestore.FieldValue.increment(10),
@@ -93,12 +89,10 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (request, 
         console.error(`Error updating user with email ${userEmail}:`, error);
       }
       break;
-    // ... gestisci altri tipi di eventi se necessario
     default:
       console.log(`Unhandled event type ${event.type}`);
   }
 
-  // Rispondi a Stripe per confermare la ricezione dell'evento
   response.json({ received: true });
 });
 
