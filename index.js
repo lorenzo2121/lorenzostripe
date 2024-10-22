@@ -89,4 +89,8 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 });
 
 // Start server on port 4242
-app.listen(4242, () => console.log('Server is running on port 4242'));
+const PORT = 4242;
+app.listen(PORT, () => {
+  console.log(`Server is running at http://localhost:${PORT}`);
+});
+
