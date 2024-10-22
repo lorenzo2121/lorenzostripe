@@ -1,16 +1,21 @@
+// Load environment variables
+require('dotenv').config();
+
+// Import dependencies
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
+
+// Initialize Express app
 const app = express();
-require('dotenv').config();
 
 // Initialize Firebase Admin SDK
 const serviceAccount = require(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  databaseURL: process.env.FIREBASE_DATABASE_URL
+  databaseURL: process.env.FIREBASE_DATABASE_URL,
 });
 
 const db = admin.firestore();
@@ -20,9 +25,10 @@ const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // General middleware
 app.use(cors());
+app.use(express.json()); // Middleware for parsing JSON requests
 
 // Endpoint to create a checkout session
-app.post('/create-checkout-session', express.json(), async (req, res) => {
+app.post('/create-checkout-session', async (req, res) => {
   const { priceId, userEmail } = req.body;
 
   try {
@@ -37,7 +43,7 @@ app.post('/create-checkout-session', express.json(), async (req, res) => {
       success_url: `http://localhost:4242/success?user_email=${userEmail}`,
       cancel_url: 'http://localhost:4242/canceled',
     });
-    
+
     res.json({ url: session.url });
   } catch (error) {
     console.error('Error creating checkout session:', error);
@@ -47,7 +53,6 @@ app.post('/create-checkout-session', express.json(), async (req, res) => {
 
 // Stripe webhook endpoint
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  console.log("webhook")
   const bodyString = req.body.toString('utf8');
   const event = JSON.parse(bodyString); // Parse the JSON string into an object
 
