@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const app = express();
+require('dotenv').config();
 
 // Initialize Firebase Admin SDK
 const serviceAccount = require(process.env.FIREBASE_SERVICE_ACCOUNT);
