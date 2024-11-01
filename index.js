@@ -26,6 +26,7 @@ const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 // General middleware
 app.use(cors());
 app.use(express.json()); // Middleware for parsing JSON requests
+app.use(express.raw({ type: 'application/json' })); // Middleware per il webhook di Stripe
 
 // Endpoint to create a checkout session
 app.post('/create-checkout-session', async (req, res) => {
@@ -52,33 +53,62 @@ app.post('/create-checkout-session', async (req, res) => {
 });
 
 // Stripe webhook endpoint
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const bodyString = req.body.toString('utf8');
-  const event = JSON.parse(bodyString); // Parse the JSON string into an object
+app.post('/webhook', async (req, res) => {
+  const event = req.body; // `req.body` è già un oggetto JSON
+  console.log('Received webhook:', event); // Log del corpo per il debug
 
+  // Gestisci l'evento
   switch (event.type) {
     case 'checkout.session.completed':
-      const session = event.data.object;
-      // Extract user email from success_url
-      const urlParams = new URLSearchParams(new URL(session.success_url).search);
-      const userEmail = urlParams.get('user_email');
+      const sessionId = event.data.object.id; // Ottieni l'ID della sessione
+      const userEmail = new URLSearchParams(new URL(event.data.object.success_url).search).get('user_email');
 
       try {
-        const userQuerySnapshot = await db.collection('professionisti').where('email', '==', userEmail).get();
-
-        if (userQuerySnapshot.empty) {
-          console.log(`No user found with email ${userEmail}`);
-          return;
-        }
-
-        userQuerySnapshot.forEach(async (doc) => {
-          await doc.ref.update({
-            richiesterimanentin: admin.firestore.FieldValue.increment(10),
-          });
-          console.log(`Updated user ${doc.id} with 10 additional requests.`);
+        // Recupera i dettagli della sessione da Stripe
+        const session = await stripe.checkout.sessions.retrieve(sessionId, {
+          expand: ['line_items'], // Espandi line_items per ottenere dettagli
         });
+
+        // Controlla se line_items è presente e ha almeno un elemento
+        if (session.line_items && session.line_items.data.length > 0) {
+          const priceId = session.line_items.data[0].price.id; // Ottieni l'ID del prezzo
+
+          let incrementValue = 0;
+
+          // Determina l'incremento in base al priceId
+          switch (priceId) {
+            case 'price_1QGHpdJ1H5ZQ9QSPLyjuHqKg':
+              incrementValue = 5;
+              break;
+            case 'price_1QGHq2J1H5ZQ9QSPvVzhBZ6D':
+              incrementValue = 15;
+              break;
+            case 'price_1QGHqSJ1H5ZQ9QSPAd1CsLGG':
+              incrementValue = 30;
+              break;
+            default:
+              console.log('Unknown price ID');
+          }
+
+          // Aggiorna l'utente con l'incremento delle richieste
+          const userQuerySnapshot = await db.collection('professionisti').where('email', '==', userEmail).get();
+
+          if (userQuerySnapshot.empty) {
+            console.log(`No user found with email ${userEmail}`);
+            return;
+          }
+
+          userQuerySnapshot.forEach(async (doc) => {
+            await doc.ref.update({
+              richiesterimanentin: admin.firestore.FieldValue.increment(incrementValue),
+            });
+            console.log(`Updated user ${doc.id} with ${incrementValue} additional requests.`);
+          });
+        } else {
+          console.log('No line items found in the session.');
+        }
       } catch (error) {
-        console.error(`Error updating user with email ${userEmail}:`, error);
+        console.error(`Error retrieving session ${sessionId}:`, error);
       }
       break;
     default:
@@ -93,5 +123,4 @@ const PORT = 4242;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running at http://0.0.0.0:${PORT}`);
 });
-
 
